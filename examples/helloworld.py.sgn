@@ -1,0 +1,10 @@
+digest: SjJYb9pZdgRu5ylPJGA58O1foWRrwifAudUrCWzmatI=
+metadata:
+  infrastructure:
+    algorithm: sha256
+    name: TestingInfrastructure
+--- |-
+  message = "hello world!"
+
+  if __name__ == "__main__":
+      print(message)
