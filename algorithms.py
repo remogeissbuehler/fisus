@@ -70,14 +70,22 @@ class SigningInfrastructure(Protocol):
             # print(header)
             # print(yaml.dump({'body': content}, default_style='|'))
 
-    def verify_file(self, filename: str) -> bool:
+    def verify_file(self, filename: str, exception_on_invalid=True) -> bool:
         # with open(TEMPLATE) as t:
         #     template = t.read()
 
         with open(filename) as f:
             content = f.read()
-
-        header, content = yaml.safe_load_all(content)
+        try:
+            header, content = yaml.safe_load_all(content)
+        except ValueError :
+            if not exception_on_invalid:
+                return False
+            raise ValueError("signature file is invalid")
+        except yaml.scanner.ScannerError:
+            if not exception_on_invalid:
+                return False
+            raise ValueError("signature file is invalid")
 
         digest = header.get("digest", None)
         if digest is None:
@@ -87,30 +95,59 @@ class SigningInfrastructure(Protocol):
 
 
 class GPGInfrastructure(SigningInfrastructure):
-    if gpg_err is not None:
-        raise ImportError("You need the gpg bindings for python to use this Infrastructure. Check the README") from e
-    
+
+    @staticmethod
+    def _ensure_gpg():
+        if gpg_err is not None:
+            msg =  "You need the gpg bindings for python to use this Infrastructure."
+            msg += "Try `sudo apt install python3-gpg` or check the README for more info."
+
+            raise ImportError(msg) from gpg_err
+
+    def __new__(cls) -> 'Self':
+        cls._ensure_gpg()
+        return super().__new__(cls)
+
     def __init__(self) -> None:
         self.algorithm_info = "gpg"
+        self.ctx = gpg.Context()
+
         super().__init__()
 
-    def _sign(self, data: bytes) -> bytes:
-        with gpg.Context() as c:
-            digest, result = c.sign(data)
-            
-            if len(result.invalid_signers) > 0:
-                raise ValueError()
+    def _ensure_signing_key(self):
+        keys = self.ctx.keylist(secret=True)
 
-            return digest
-            
+        def _valid(key):
+            is_valid = key.can_sign
+            is_valid = is_valid and not key.disabled
+            is_valid = is_valid and not key.expired
+            is_valid = is_valid and not key.invalid
+            is_valid = is_valid and not key.revoked
+
+            return is_valid
+
+        keys = (k for k in keys if _valid(k))
+
+        try:
+            next(keys)
+        except StopIteration:
+            raise ValueError("need at least one valid private signing key")
+
+    def _sign(self, data: bytes) -> bytes:
+        self._ensure_signing_key()
+        digest, result = self.ctx.sign(data, mode=gpg.constants.SIG_MODE_DETACH)
+        
+        if len(result.invalid_signers) > 0:
+            raise ValueError()
+
+        return digest
 
     def _verify(self, data: bytes, digest: bytes) -> bool:
-        with gpg.Context() as c:
-            try:
-                result = c.verify(data, signature=digest)
-                return True
-            except gpg.errors.VerificationError:
-                return False
+        try:
+            result = self.ctx.verify(data, signature=digest)
+            return True
+        except gpg.errors.VerificationError:
+            return False
     
 
 
@@ -142,7 +179,20 @@ if __name__ == "__main__":
         c = f.read()
     with open("examples/tampered.py.sgn", 'w') as f:
         f.write(c.replace("hello", "ciao"))
+    with open("examples/tampered2.py.sgn", 'w') as f:
+        f.write(c.split("--- ")[-1])
+    with open("examples/tampered3.py.sgn", 'w') as f:
+        f.write(c)
+        f.write("--- \n")
+        f.write("malish: true")
+    with open("examples/invalid.sgn", 'w') as f:
+        f.write(">> This is not a yaml file <<<\n")
+        f.write(">>> really not              <<")
     
 
     print(infra.verify_file("examples/helloworld.py.sgn"))
-    print(infra.verify_file("examples/tampered.py.sgn"))
+    for f in ["tampered.py", "tampered2.py", "tampered3.py", "invalid"]:
+        try:
+            print(infra.verify_file(f"examples/{f}.sgn", exception_on_invalid=False))
+        except ValueError:
+            print("False: ValueError")
