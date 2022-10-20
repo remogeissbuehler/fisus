@@ -1,10 +1,14 @@
-digest: SjJYb9pZdgRu5ylPJGA58O1foWRrwifAudUrCWzmatI=
+digest: |-
+  owGbwMvMwCVmWRBj8GV3xyPG075JDMn+xotzU4uLE9NTFWwVlDJSc3LyFcrzi3JSFJW4uDLTFOLj
+  8xJzU+PjFWyB0vHxuYmZefHxSlZcCkBQUJSZV6IB1a7ZUcrCIMbFICumyOIfyKO2rW52SGZIz0SY
+  daxMILsYuDgFYCIqzIwMm0TPxTu+2CvzJv/r7tSsJOMV/vImM5qjspy3tk0/9/ywL8M/FX7XHsM5
+  y6KLT2zgm+Hz1ePnT/Ze5rZdQSVxV8U+fDvMDgA=
 metadata:
   infrastructure:
-    algorithm: sha256
-    name: TestingInfrastructure
+    algorithm: gpg
+    name: GPGInfrastructure
 --- |-
-  message = "goodbye world!"
+  message = "ciao world!"
 
   if __name__ == "__main__":
       print(message)

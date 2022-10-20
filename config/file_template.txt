@@ -1,4 +1,0 @@
----  BEGIN pytrust HEADER ---
-{header}
---- END    pytrust HEADER ---
-{content}

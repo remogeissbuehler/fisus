@@ -4,9 +4,13 @@ from typing import Protocol
 import warnings
 import yaml 
 import hashlib
-from parse import parse
+import shutil
 
-TEMPLATE = "config/file_template.txt"
+gpg_err = None
+try:
+    import gpg
+except ImportError as e:
+    gpg_err = e
 
 def str_presenter(dumper, data):
   if len(data.splitlines()) > 1:  # check for multiline string
@@ -54,9 +58,6 @@ class SigningInfrastructure(Protocol):
             content = f.read()
             digest = self.sign(content)
 
-        with open(TEMPLATE) as f:
-            template = f.read()
-
         with open(filename + ".sgn", "w") as f:
             header = {
                 'metadata': self.metadata,
@@ -85,6 +86,34 @@ class SigningInfrastructure(Protocol):
         return self.verify(content, digest)
 
 
+class GPGInfrastructure(SigningInfrastructure):
+    if gpg_err is not None:
+        raise ImportError("You need the gpg bindings for python to use this Infrastructure. Check the README") from e
+    
+    def __init__(self) -> None:
+        self.algorithm_info = "gpg"
+        super().__init__()
+
+    def _sign(self, data: bytes) -> bytes:
+        with gpg.Context() as c:
+            digest, result = c.sign(data)
+            
+            if len(result.invalid_signers) > 0:
+                raise ValueError()
+
+            return digest
+            
+
+    def _verify(self, data: bytes, digest: bytes) -> bool:
+        with gpg.Context() as c:
+            try:
+                result = c.verify(data, signature=digest)
+                return True
+            except gpg.errors.VerificationError:
+                return False
+    
+
+
 class TestingInfrastructure(SigningInfrastructure):
     def __init__(self) -> None:
         warnings.warn("this class is only for testing!!")
@@ -105,8 +134,15 @@ class TestingInfrastructure(SigningInfrastructure):
 
 
 if __name__ == "__main__":
-    infra = TestingInfrastructure()
+    infra = GPGInfrastructure()
     infra.sign_file("examples/helloworld.py")
+    shutil.copyfile("examples/helloworld.py.sgn", "examples/tampered.py.sgn")
+
+    with open("examples/tampered.py.sgn") as f:
+        c = f.read()
+    with open("examples/tampered.py.sgn", 'w') as f:
+        f.write(c.replace("hello", "ciao"))
+    
 
     print(infra.verify_file("examples/helloworld.py.sgn"))
     print(infra.verify_file("examples/tampered.py.sgn"))
