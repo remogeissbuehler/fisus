@@ -1,14 +1,21 @@
 import base64
-from abc import abstractmethod
-from typing import Protocol
-import warnings
-import yaml 
 import hashlib
+import os
 import shutil
+import warnings
+from abc import abstractmethod
+from typing import Any, Generator, Optional, Protocol, Type
+
+import yaml
+
+import config as C
+import errors as E
+import utils as U
 
 gpg_err = None
 try:
     import gpg
+    from gpg.gpgme import _gpgme_key as GPGKey
 except ImportError as e:
     gpg_err = e
 
@@ -95,22 +102,23 @@ class SigningInfrastructure(Protocol):
 
 
 class GPGInfrastructure(SigningInfrastructure):
-
     @staticmethod
     def _ensure_gpg():
         if gpg_err is not None:
             msg =  "You need the gpg bindings for python to use this Infrastructure."
             msg += "Try `sudo apt install python3-gpg` or check the README for more info."
 
-            raise ImportError(msg) from gpg_err
+            raise E.UnavailableInfraException(msg) from gpg_err
 
     def __new__(cls) -> 'Self':
         cls._ensure_gpg()
         return super().__new__(cls)
 
-    def __init__(self) -> None:
+    def __init__(self, home_dir=C.GPG_HOMEDIR) -> None:
         self.algorithm_info = "gpg"
-        self.ctx = gpg.Context()
+        self.home_dir = os.path.expanduser(home_dir)
+        self.ctx = gpg.Context(home_dir=self.home_dir)
+        os.makedirs(self.home_dir, exist_ok=True)
 
         super().__init__()
 
@@ -131,24 +139,63 @@ class GPGInfrastructure(SigningInfrastructure):
         try:
             next(keys)
         except StopIteration:
-            raise ValueError("need at least one valid private signing key")
+            msg = "need at least one valid private signing key"
+            raise E.BadInfraStateException(msg)
 
     def _sign(self, data: bytes) -> bytes:
         self._ensure_signing_key()
         digest, result = self.ctx.sign(data, mode=gpg.constants.SIG_MODE_DETACH)
         
         if len(result.invalid_signers) > 0:
-            raise ValueError()
+            msg = "Some Signers are invalid"
+            raise E.BadInfraStateException(msg)
 
         return digest
 
     def _verify(self, data: bytes, digest: bytes) -> bool:
         try:
             result = self.ctx.verify(data, signature=digest)
+
+            # TODO: investigate result further
             return True
         except gpg.errors.VerificationError:
             return False
     
+    def _generate_primary_key(self, name: str, email: str, password: str, comment: Optional[str] = None) -> Any:
+        if comment is None:
+            comment = ""
+        else:
+            comment = f"({comment})"
+        uid = f"{name} {comment} <{email}>"
+        return self.ctx.create_key(uid, C.DEFAULT_KEY_TYPE, sign=False, encrypt=False, authenticate=False, passphrase=password)
+
+    def _get_primary_key(self, primary_key: Optional[str] = None) -> GPGKey:
+        if primary_key is None and U.glen(self._private_keys) > 1:
+            msg = "Explicitly set the primary key if there are more than one"
+            raise ValueError(msg)
+        
+        try:
+            return self.ctx.get_key(primary_key)
+        except:
+            pass
+
+        try:
+            return next(self._private_keys)
+        except StopIteration:
+            msg = "No primary key"
+            raise E.MissingKeyException(msg)
+    
+    def _generate_signing_key(self, primary_key: Optional[str] = None) -> Any:
+        pkey = self._get_primary_key(primary_key)
+        try:
+            skey = self.ctx.create_subkey(pkey)
+            print(skey)
+        except Exception as e:
+            raise e
+
+    @property
+    def _private_keys(self) -> Generator[GPGKey, None, None]:
+        return self.ctx.keylist(secret=True)
 
 
 class TestingInfrastructure(SigningInfrastructure):
