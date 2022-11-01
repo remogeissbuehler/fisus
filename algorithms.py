@@ -161,12 +161,11 @@ class GPGInfrastructure(SigningInfrastructure):
         except gpg.errors.VerificationError:
             return False
     
-    def _generate_primary_key(self, name: str, email: str, password: str, comment: Optional[str] = None) -> Any:
-        if comment is None:
-            comment = ""
-        else:
+    def _generate_primary_key(self, name: str, email: str, password: str, comment: str = "") -> Any:
+        if comment != "":
             comment = f"({comment})"
         uid = f"{name} {comment} <{email}>"
+
         return self.ctx.create_key(uid, C.DEFAULT_KEY_TYPE, sign=False, encrypt=False, authenticate=False, passphrase=password)
 
     def _get_primary_key(self, primary_key: Optional[str] = None) -> GPGKey:
